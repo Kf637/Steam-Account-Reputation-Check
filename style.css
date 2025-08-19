@@ -10,13 +10,22 @@
   --danger: #ff4d4f;
 }
 
+/* Sticky footer layout */
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
 body {
+  display: flex;
+  flex-direction: column;
   background: linear-gradient(180deg, #0b0c0d 0%, #0f1113 100%);
-  min-height: 100vh;
   font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--bs-body-color);
 }
 
 .main-container {
+  flex: 1; /* pushes footer down if page is short */
   max-width: 800px;
   margin: 0 auto;
   padding: 2rem 1rem;
@@ -176,6 +185,19 @@ body {
   height: 3rem;
   border-width: 0.3em;
   color: var(--accent);
+}
+
+/* Footer */
+.footer {
+  background: rgba(255, 255, 255, 0.03);
+  border-top: 1px solid var(--border-color);
+  text-align: center;
+  padding: 1rem 0;
+  color: #9aa0a6;
+  font-size: 0.9rem;
+}
+.footer p {
+  margin: 0.3rem 0;
 }
 
 @media (max-width: 768px) {
