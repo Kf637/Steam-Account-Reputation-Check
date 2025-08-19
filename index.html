@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Steam Account Trust UI</title>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .main-container {
+      flex: 1; /* pushes footer to bottom if page content is short */
+    }
+    footer {
+      text-align: center;
+      margin-top: 2rem;
+      padding: 1rem 0;
+      color: #6c757d;
+      font-size: 0.9rem;
+    }
+    footer p {
+      margin: 0.3rem 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="main-container">
+    <div class="app-header">
+      <h1 class="mb-0">
+        <i class="fab fa-steam me-2"></i>
+        Steam Account Reputation Check
+      </h1>
+    </div>
+
+    <div class="trust-panel">
+      <form id="trustForm" class="mb-3">
+        <div class="row g-3">
+          <div class="col-md-9">
+            <input 
+              type="text" 
+              class="form-control form-control-lg" 
+              id="trustInput" 
+              placeholder="SteamID64, vanity name, or profile URL"
+              required
+            >
+            <div class="form-text text-secondary">
+              Accepts SteamID64 or a Steam profile URL (/id/ or /profiles/)
+            </div>
+          </div>
+          <div class="col-md-3">
+            <button type="submit" class="btn btn-primary btn-lg w-100" id="trustGo">
+              <i class="fas fa-search me-1"></i>
+              Check
+            </button>
+          </div>
+        </div>
+      </form>
+
+      <div id="trustSteamId" class="mb-3" style="display: none;">
+        <small class="text-muted">SteamID64: </small>
+        <code class="steamid-display" id="steamIdCode"></code>
+        <button class="btn btn-outline-secondary btn-sm btn-copy" id="copyIdBtn">
+          <i class="fas fa-copy"></i> Copy
+        </button>
+      </div>
+
+      <div id="trustResults"></div>
+    </div>
+  </div>
+  
+  <footer>
+    <p>This site is not affiliated with Steam</p>
+    <p>All trademarks and registered trademarks are the property of their respective owners.</p>
+  </footer>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+  <script src="lib/flags.js"></script>
+  <script src="lib/steamApi.js"></script>
+  <script src="lib/scoring.js"></script>
+  <script src="steam-trust-app.js"></script>
+</body>
+</html>
