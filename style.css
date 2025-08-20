@@ -192,12 +192,30 @@ body {
   background: rgba(255, 255, 255, 0.03);
   border-top: 1px solid var(--border-color);
   text-align: center;
-  padding: 1rem 0;
+  padding: 1rem 1rem;
   color: #9aa0a6;
   font-size: 0.9rem;
 }
 .footer p {
   margin: 0.3rem 0;
+}
+
+.steamid64 {
+  color: #9fb8ff;
+}
+
+a {
+  color: #0066cc;
+  text-decoration: none;
+}
+
+a:hover {
+  color: #ff6600;
+  text-decoration: underline;
+}
+
+a:active {
+  color: #cc0000;
 }
 
 @media (max-width: 768px) {
