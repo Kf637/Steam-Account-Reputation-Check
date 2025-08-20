@@ -370,28 +370,46 @@
 
         const encoded = card.getAttribute('data-report') || '';
         const reportText = encoded ? decodeURIComponent(encoded) : '';
-
         if (!reportText) return;
-
-        try {
-        navigator.clipboard.writeText(reportText);
 
         const copyBtn = document.getElementById('copyReportBtn');
         if (!copyBtn) return;
-        const originalContent = copyBtn.innerHTML;
-        copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
-        copyBtn.classList.remove('btn-outline-secondary');
-        copyBtn.classList.add('btn-success');
 
-        setTimeout(() => {
-            copyBtn.innerHTML = originalContent;
-            copyBtn.classList.remove('btn-success');
-            copyBtn.classList.add('btn-outline-secondary');
-        }, 2000);
-        } catch (e) {
-        console.error('Failed to copy report to clipboard:', e);
+        const originalContent = copyBtn.innerHTML;
+
+        function showCopied() {
+            copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+            copyBtn.classList.remove('btn-outline-secondary');
+            copyBtn.classList.add('btn-success');
+            setTimeout(() => {
+                copyBtn.innerHTML = originalContent;
+                copyBtn.classList.remove('btn-success');
+                copyBtn.classList.add('btn-outline-secondary');
+            }, 2000);
+        }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(reportText).then(showCopied).catch(e => {
+                console.error('Failed to copy report:', e);
+            });
+        } else {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = reportText;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showCopied();
+            } catch (e) {
+                console.error('Fallback copy failed:', e);
+            }
+            document.body.removeChild(textarea);
         }
     }
+
 
     async downloadCardReport() {
         const trustResults = document.getElementById('trustResults');
