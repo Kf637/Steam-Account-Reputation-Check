@@ -489,26 +489,49 @@
 
     copySteamId() {
         const steamIdCode = document.getElementById("steamIdCode");
-        if (steamIdCode) {
-        try {
-            navigator.clipboard.writeText(steamIdCode.textContent);
+        if (!steamIdCode) return;
 
-            const copyBtn = document.getElementById("copyIdBtn");
-            const originalContent = copyBtn.innerHTML;
+        const textToCopy = steamIdCode.textContent || '';
+        if (!textToCopy) return;
+
+        const copyBtn = document.getElementById("copyIdBtn");
+        if (!copyBtn) return;
+
+        const originalContent = copyBtn.innerHTML;
+
+        function showCopied() {
             copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
             copyBtn.classList.remove("btn-outline-secondary");
             copyBtn.classList.add("btn-success");
-
             setTimeout(() => {
-            copyBtn.innerHTML = originalContent;
-            copyBtn.classList.remove("btn-success");
-            copyBtn.classList.add("btn-outline-secondary");
+                copyBtn.innerHTML = originalContent;
+                copyBtn.classList.remove("btn-success");
+                copyBtn.classList.add("btn-outline-secondary");
             }, 2000);
-        } catch (e) {
-            console.error("Failed to copy to clipboard:", e);
         }
+
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(textToCopy).then(showCopied).catch(e => {
+                console.error("Failed to copy to clipboard:", e);
+            });
+        } else {
+            // Fallback for older browsers
+            const textarea = document.createElement('textarea');
+            textarea.value = textToCopy;
+            textarea.style.position = 'fixed';
+            textarea.style.top = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showCopied();
+            } catch (e) {
+                console.error("Fallback copy failed:", e);
+            }
+            document.body.removeChild(textarea);
         }
     }
+
 
     async handleTrustCheck() {
         const input = document.getElementById("trustInput").value.trim();
