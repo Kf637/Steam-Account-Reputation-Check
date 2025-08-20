@@ -60,8 +60,13 @@ body {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--border-color);
   color: var(--bs-body-color);
-  font-size: 3vw;
+  height: 3rem;
+  line-height: 3rem;
+  font-size: clamp(1rem, 3vw, 1.5rem);
+  padding: 0 1rem;
+  box-sizing: border-box;
 }
+
 
 .form-control:focus {
   background: rgba(255, 255, 255, 0.03);
