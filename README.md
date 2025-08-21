@@ -1,5 +1,7 @@
 # Steam Account Reputation Check
 
+Preview: https://steamrep.kf637.tech
+
 A lightweight web application for analyzing Steam account reputation through various trust signals including profile data, ban history, account level, community participation, and gaming activity. Simply enter a SteamID64, vanity username, or profile URL to receive a comprehensive trust assessment.
 
 ## Features
@@ -10,6 +12,10 @@ A lightweight web application for analyzing Steam account reputation through var
 - **Export Options**: Copy SteamID and generate downloadable reputation reports
 - **Rate Limiting**: Built-in protection against API abuse with clear user feedback
 - **Privacy Aware**: Handles private profiles gracefully with available public data
+
+## Screenshots
+
+![Screenshot of page](.github/images/Screenshot_2.png)
 
 ## Getting Started
 
