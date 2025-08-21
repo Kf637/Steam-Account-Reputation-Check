@@ -27,6 +27,20 @@ function checkRateLimit(ip, key, limit, windowMs) {
   return { ok: true };
 }
 
+// Determine client IP, preferring Cloudflare headers when present (for CF tunnels/proxies)
+function getClientIp(req) {
+  try {
+    const cfIp = req.headers && (req.headers['cf-connecting-ip'] || req.headers['true-client-ip']);
+    if (cfIp && typeof cfIp === 'string' && cfIp.trim()) return cfIp.trim();
+    const xff = req.headers && req.headers['x-forwarded-for'];
+    if (xff && typeof xff === 'string' && xff.trim()) {
+      const first = xff.split(',')[0].trim();
+      if (first) return first;
+    }
+  } catch (_) {}
+  return req.socket && req.socket.remoteAddress || 'local';
+}
+
 function sendJSON(res, obj, code = 200) {
   const body = JSON.stringify(obj);
   res.writeHead(code, {
@@ -61,7 +75,7 @@ const server = http.createServer(async (req, res) => {
   // The key remains server-side only and is used by the /api/steam-account proxy.
     // Resolve vanity (server-side to avoid CORS)
     if (url.startsWith('/api/resolve-vanity')) {
-      const ip = req.socket.remoteAddress || 'local';
+  const ip = getClientIp(req);
       // enforce: 5 requests per 60 seconds per IP
       const rl = checkRateLimit(ip, 'resolve-vanity', 5, 60_000);
       if (!rl.ok) {
@@ -86,7 +100,7 @@ const server = http.createServer(async (req, res) => {
     }
       // Proxy Steam API requests to avoid CORS in the browser
       if (url.startsWith('/api/steam-account')) {
-        const ip = req.socket.remoteAddress || 'local';
+  const ip = getClientIp(req);
         // heavy endpoint: enforce 5 requests per 60 seconds per IP
         const rl = checkRateLimit(ip, 'steam-account', 5, 60_000);
         if (!rl.ok) {
@@ -139,8 +153,8 @@ const server = http.createServer(async (req, res) => {
 
     // Serve root -> index.html with per-IP page load rate limit
     if (url === '/' || url === '/index.html') {
-      const ip = req.socket.remoteAddress || 'local';
-      const rl = checkRateLimit(ip, 'page-load', 5, 60_000);
+  const ip = getClientIp(req);
+      const rl = checkRateLimit(ip, 'page-load', 100, 60_000);
       if (!rl.ok) { res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': String(rl.retryAfter) }); res.end('Too Many Requests'); return; }
       sendFile(res, path.join(ROOT, 'index.html'));
       return;

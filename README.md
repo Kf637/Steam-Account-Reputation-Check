@@ -112,7 +112,7 @@ The application implements per-IP rate limiting to ensure API quota compliance a
 
 | Endpoint | Limit | Window |
 |----------|-------|--------|
-| Page requests (`/`, `/index.html`) | 5 requests | 60 seconds |
+| Page requests (`/`, `/index.html`) | 100 requests | 60 seconds |
 | `/api/resolve-vanity` | 5 requests | 60 seconds |
 | `/api/steam-account` | 5 requests | 60 seconds |
 
