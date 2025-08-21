@@ -42,7 +42,7 @@ body {
 
 .trust-panel {
   background: var(--panel-bg);
-  border: 1px solid var(--border-color);
+  border: 1px solid #4b4b4b;
   border-radius: 12px;
   padding: 1.5rem;
 }
