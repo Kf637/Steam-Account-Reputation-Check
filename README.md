@@ -54,7 +54,7 @@ Build the container locally from source:
 
 ```bash
 # Clone repository and navigate to project directory
-git clone <repository-url>
+git clone https://github.com/Kf637/Steam-Account-Reputation-Check
 cd steam-account-reputation-check
 
 # Build container
