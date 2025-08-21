@@ -87,6 +87,16 @@
             const resp = await fetch(
                 `/api/steam-account?steamid=${encodeURIComponent(steamId64)}`
             );
+            // Handle server rate limiting explicitly so the UI can show a clear message
+            if (resp.status === 429) {
+                let retry = null;
+                try {
+                    const j = await resp.json();
+                    retry = j && j.retry_after;
+                } catch (e) {}
+                if (!retry) retry = parseInt(resp.headers.get('Retry-After')) || null;
+                return { error: 'rate_limited', retry_after: retry };
+            }
             if (!resp.ok) return null;
             const json = await resp.json();
             return json;

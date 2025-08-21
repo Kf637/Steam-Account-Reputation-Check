@@ -62,9 +62,13 @@ const server = http.createServer(async (req, res) => {
     // Resolve vanity (server-side to avoid CORS)
     if (url.startsWith('/api/resolve-vanity')) {
       const ip = req.socket.remoteAddress || 'local';
-      // stricter: 10 requests per 60 seconds per IP
-      const rl = checkRateLimit(ip, 'resolve-vanity', 10, 60_000);
-      if (!rl.ok) { res.writeHead(429, {'Content-Type':'application/json'}); res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter })); return; }
+      // enforce: 5 requests per 60 seconds per IP
+      const rl = checkRateLimit(ip, 'resolve-vanity', 5, 60_000);
+      if (!rl.ok) {
+        res.writeHead(429, { 'Content-Type':'application/json', 'Retry-After': String(rl.retryAfter) });
+        res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter }));
+        return;
+      }
       const u = new URL(req.url, `http://localhost:${PORT}`);
       const vanity = u.searchParams.get('vanity');
       if (!vanity) { sendJSON(res, { error: 'missing vanity' }, 400); return; }
@@ -83,9 +87,13 @@ const server = http.createServer(async (req, res) => {
       // Proxy Steam API requests to avoid CORS in the browser
       if (url.startsWith('/api/steam-account')) {
         const ip = req.socket.remoteAddress || 'local';
-        // heavy endpoint: 10 requests per 60 seconds per IP
-        const rl = checkRateLimit(ip, 'steam-account', 10, 60_000);
-        if (!rl.ok) { res.writeHead(429, {'Content-Type':'application/json'}); res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter })); return; }
+        // heavy endpoint: enforce 5 requests per 60 seconds per IP
+        const rl = checkRateLimit(ip, 'steam-account', 5, 60_000);
+        if (!rl.ok) {
+          res.writeHead(429, { 'Content-Type':'application/json', 'Retry-After': String(rl.retryAfter) });
+          res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter }));
+          return;
+        }
         const u = new URL(req.url, `http://localhost:${PORT}`);
         const steamid = u.searchParams.get('steamid');
         const key = process.env.STEAM_API_KEY || '';
@@ -132,7 +140,7 @@ const server = http.createServer(async (req, res) => {
     // Serve root -> index.html with per-IP page load rate limit
     if (url === '/' || url === '/index.html') {
       const ip = req.socket.remoteAddress || 'local';
-      const rl = checkRateLimit(ip, 'page-load', 50, 60_000);
+      const rl = checkRateLimit(ip, 'page-load', 5, 60_000);
       if (!rl.ok) { res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': String(rl.retryAfter) }); res.end('Too Many Requests'); return; }
       sendFile(res, path.join(ROOT, 'index.html'));
       return;
