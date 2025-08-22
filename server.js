@@ -6,6 +6,7 @@ const path = require('path');
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3100;
 const ROOT = path.resolve(__dirname);
 const DEBUG_HTTP = !!process.env.DEBUG_HTTP;
+const API_TIMEOUT_MS = 15000; // hardcoded 15s timeout for external API calls
 
 // Simple in-memory rate limiter state. This is sufficient for local use.
 // Structure: Map<key, {count:number, start:number}>
@@ -87,12 +88,24 @@ const server = http.createServer(async (req, res) => {
       const vanity = u.searchParams.get('vanity');
       if (!vanity) { sendJSON(res, { error: 'missing vanity' }, 400); return; }
       try {
-        const xmlResp = await fetch(`https://steamcommunity.com/id/${encodeURIComponent(vanity)}/?xml=1`);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+        let xmlResp;
+        try {
+          xmlResp = await fetch(`https://steamcommunity.com/id/${encodeURIComponent(vanity)}/?xml=1`, { signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
         if (!xmlResp.ok) { sendJSON(res, { error: 'not found' }, 404); return; }
         const txt = await xmlResp.text();
         const m = txt.match(/<steamID64>(\d{17})<\/steamID64>/);
         if (m) sendJSON(res, { steamid: m[1] }); else sendJSON(res, { error: 'no steamid' }, 404);
       } catch (e) {
+        if (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR')) {
+          if (DEBUG_HTTP) console.warn('[http] /api/resolve-vanity timeout');
+          sendJSON(res, { error: 'timeout' }, 504);
+          return;
+        }
         console.error('vanity resolve error', e);
         sendJSON(res, { error: 'server error' }, 500);
       }
@@ -116,6 +129,9 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         try {
+          // Create a shared timeout controller so the whole request times out consistently
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
           const endpoints = {
             summaries: `https://api.steampowered.com/ISteamUser/GetPlayerSummaries/v2/?key=${encodeURIComponent(key)}&steamids=${encodeURIComponent(steamid)}`,
             bans: `https://api.steampowered.com/ISteamUser/GetPlayerBans/v1/?key=${encodeURIComponent(key)}&steamids=${encodeURIComponent(steamid)}`,
@@ -125,9 +141,18 @@ const server = http.createServer(async (req, res) => {
             groups: `https://api.steampowered.com/ISteamUser/GetUserGroupList/v1/?key=${encodeURIComponent(key)}&steamid=${encodeURIComponent(steamid)}`,
             recent: `https://api.steampowered.com/IPlayerService/GetRecentlyPlayedGames/v1/?key=${encodeURIComponent(key)}&steamid=${encodeURIComponent(steamid)}`
           };
-
-          const promises = Object.values(endpoints).map(url => fetch(url).then(r=>r.ok? r.json().catch(()=>null): null).catch(()=>null));
-          const [sumJson, banJson, badgesJson, friendsJson, ownedJson, groupsJson, recentJson] = await Promise.all(promises);
+          const promises = Object.values(endpoints).map(url =>
+            fetch(url, { signal: controller.signal })
+              .then(r => r.ok ? r.json().catch(() => null) : null)
+              .catch(() => null)
+          );
+          const results = await Promise.all(promises).finally(() => clearTimeout(timer));
+          if (controller.signal.aborted) {
+            if (DEBUG_HTTP) console.warn('[http] /api/steam-account timeout');
+            sendJSON(res, { error: 'timeout' }, 504);
+            return;
+          }
+          const [sumJson, banJson, badgesJson, friendsJson, ownedJson, groupsJson, recentJson] = results;
 
           const player = (sumJson && sumJson.response && sumJson.response.players || [])[0] || null;
           const ban = (banJson && banJson.players || [])[0] || null;
