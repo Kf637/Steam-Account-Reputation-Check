@@ -7,6 +7,13 @@ const PORT = process.env.PORT ? Number(process.env.PORT) : 3100;
 const ROOT = path.resolve(__dirname);
 const DEBUG_HTTP = !!process.env.DEBUG_HTTP;
 const API_TIMEOUT_MS = 15000; // hardcoded 15s timeout for external API calls
+// Resolve the real path of the root directory to guard against symlink traversal
+let ROOT_REAL;
+try {
+  ROOT_REAL = fs.realpathSync(ROOT);
+} catch {
+  ROOT_REAL = ROOT;
+}
 
 // Simple in-memory rate limiter state. This is sufficient for local use.
 // Structure: Map<key, {count:number, start:number}>
@@ -186,17 +193,24 @@ const server = http.createServer(async (req, res) => {
     }
 
   // Only allow serving files inside the workspace root
-  // Strip leading slashes so path.join(ROOT, rel) can't be bypassed by an absolute path
-  const relUrl = decodeURIComponent(url).replace(/^\/+/,'');
-  const safePath = path.normalize(path.join(ROOT, relUrl || '')).replace(/\\/g, '/');
-  const normalizedRoot = ROOT.replace(/\\/g, '/');
-  // allow the root itself or any path under it
-    if (!(safePath === normalizedRoot || safePath.startsWith(normalizedRoot + '/'))) {
-      if (DEBUG_HTTP) console.warn(`[http] Forbidden path: ${url} -> ${safePath}`);
-      res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Forbidden');
-      return;
-    }
+  // Normalize and resolve to avoid traversal and symlink escape.
+  const relUrlDecoded = decodeURIComponent(url).replace(/^\/+/, '');
+  const relUrlSafe = relUrlDecoded.replace(/\0/g, ''); // strip null bytes if any
+  const joined = path.join(ROOT, relUrlSafe || '');
+  let safePath;
+  try {
+    safePath = fs.realpathSync(joined);
+  } catch {
+    // If the file doesn't exist yet, fall back to the normalized joined path for checks below
+    safePath = path.normalize(joined);
+  }
+  const relFromRoot = path.relative(ROOT_REAL, safePath);
+  if (relFromRoot.startsWith('..') || path.isAbsolute(relFromRoot)) {
+    if (DEBUG_HTTP) console.warn(`[http] Forbidden path: ${url} -> ${safePath}`);
+    res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Forbidden');
+    return;
+  }
 
     if (DEBUG_HTTP) console.log(`[http] ${req.method} ${url} -> ${safePath}`);
 

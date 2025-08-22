@@ -125,16 +125,18 @@
             : `https://${input}`;
         const u = new URL(maybeUrl);
         const host = u.hostname.toLowerCase();
+        const isSteamCommunityHost = (h) => h === 'steamcommunity.com' || h.endsWith('.steamcommunity.com');
 
-        if (host.includes("steamcommunity.com")) {
+        if (isSteamCommunityHost(host)) {
             const parts = u.pathname.split("/").filter(Boolean);
+            const seg0 = (parts[0] || '').toLowerCase();
 
-            if (parts[0] === "profiles" && parts[1]) {
+            if (seg0 === "profiles" && parts[1]) {
             const p = parts[1];
             if (/^\d{17}$/.test(p)) return p;
             }
 
-            if (parts[0] === "id" && parts[1]) {
+            if (seg0 === "id" && parts[1]) {
             const vanity = parts[1];
             return await this.resolveVanityName(vanity);
             }
@@ -189,9 +191,9 @@
         const { player, ban, extras } = data;
         const { score, scoreLevel, isPrivate, ageDays, ageLevel } = scoreObj;
 
-        const flag = window.Flags
-        ? window.Flags.countryCodeToFlag(player.loccountrycode)
-        : "";
+    const flag = window.Flags
+    ? (window.Flags.getFlagHtml ? window.Flags.getFlagHtml(player.loccountrycode, 18) : window.Flags.countryCodeToFlag(player.loccountrycode))
+    : "";
         const avatar =
         player.avatarfull ||
         player.avatar ||
