@@ -266,37 +266,6 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-function getPreferredLocalAddress() {
-  try {
-    const nets = os.networkInterfaces();
-    let candidateIPv4 = null;
-    let candidateIPv6 = null;
-    for (const name of Object.keys(nets)) {
-      for (const n of nets[name] || []) {
-        if (!n || n.internal) continue;
-        const fam = n.family || '';
-        const addr = n.address || '';
-        // Prefer non-link-local IPv4
-        if (fam === 'IPv4' || fam === 4) {
-          if (!addr.startsWith('169.254.')) return addr;
-          if (!candidateIPv4) candidateIPv4 = addr;
-        }
-        // Save a non-link-local IPv6 as fallback
-        if (fam === 'IPv6' || fam === 6) {
-          if (!addr.startsWith('fe80:') && !candidateIPv6) candidateIPv6 = addr;
-        }
-      }
-    }
-    return candidateIPv4 || candidateIPv6 || null;
-  } catch {
-    return null;
-  }
-}
-
 server.listen(PORT, () => {
-  const addr = server.address && server.address();
-  const ip = getPreferredLocalAddress();
-  const host = ip ? (ip.includes(':') ? `[${ip}]` : ip) : 'localhost';
-  const port = (addr && addr.port) || PORT;
-  console.log(`Server running on http://${host}:${port}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
