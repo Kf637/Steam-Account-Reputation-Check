@@ -115,6 +115,12 @@
 
         input = input.replace(/\s*@steam$/i, "");
 
+        // If a SteamID64 appears anywhere (must start with 765611 and be 17 digits), use it directly
+        {
+            const m = input.match(/(765611\d{11})/);
+            if (m) return m[1];
+        }
+
         if (/^\d{17}$/.test(input)) {
         return input;
         }
