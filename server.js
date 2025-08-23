@@ -2,6 +2,7 @@ require('dotenv').config();
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3100;
 const ROOT = path.resolve(__dirname);
@@ -87,6 +88,11 @@ const server = http.createServer(async (req, res) => {
       // enforce: 5 requests per 60 seconds per IP
       const rl = checkRateLimit(ip, 'resolve-vanity', 5, 60_000);
       if (!rl.ok) {
+        try {
+          const u = new URL(req.url, `http://localhost:${PORT}`);
+          const vanity = u.searchParams.get('vanity');
+          console.log(`[rate-limit] ip=${ip} route=resolve-vanity vanity=${JSON.stringify(vanity)} retry_after=${rl.retryAfter}s`);
+        } catch {}
         res.writeHead(429, { 'Content-Type':'application/json', 'Retry-After': String(rl.retryAfter) });
         res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter }));
         return;
@@ -95,6 +101,7 @@ const server = http.createServer(async (req, res) => {
       const vanity = u.searchParams.get('vanity');
       if (!vanity) { sendJSON(res, { error: 'missing vanity' }, 400); return; }
       try {
+        const started = Date.now();
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
         let xmlResp;
@@ -103,13 +110,23 @@ const server = http.createServer(async (req, res) => {
         } finally {
           clearTimeout(timer);
         }
-        if (!xmlResp.ok) { sendJSON(res, { error: 'not found' }, 404); return; }
+        if (!xmlResp.ok) {
+          console.log(`[lookup] ip=${ip} route=resolve-vanity vanity=${JSON.stringify(vanity)} result=not_found dur_ms=${Date.now()-started}`);
+          sendJSON(res, { error: 'not found' }, 404); return;
+        }
         const txt = await xmlResp.text();
         const m = txt.match(/<steamID64>(\d{17})<\/steamID64>/);
-        if (m) sendJSON(res, { steamid: m[1] }); else sendJSON(res, { error: 'no steamid' }, 404);
+        if (m) {
+          console.log(`[lookup] ip=${ip} route=resolve-vanity vanity=${JSON.stringify(vanity)} -> steamid=${m[1]} dur_ms=${Date.now()-started}`);
+          sendJSON(res, { steamid: m[1] });
+        } else {
+          console.log(`[lookup] ip=${ip} route=resolve-vanity vanity=${JSON.stringify(vanity)} result=no_steamid dur_ms=${Date.now()-started}`);
+          sendJSON(res, { error: 'no steamid' }, 404);
+        }
       } catch (e) {
         if (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR')) {
-          if (DEBUG_HTTP) console.warn('[http] /api/resolve-vanity timeout');
+          const vanitySafe = (()=>{ try { const u = new URL(req.url, `http://localhost:${PORT}`); return u.searchParams.get('vanity'); } catch { return null; } })();
+          console.log(`[timeout] ip=${ip} route=resolve-vanity vanity=${JSON.stringify(vanitySafe)} dur_ms=${API_TIMEOUT_MS}`);
           sendJSON(res, { error: 'timeout' }, 504);
           return;
         }
@@ -124,6 +141,11 @@ const server = http.createServer(async (req, res) => {
         // heavy endpoint: enforce 5 requests per 60 seconds per IP
         const rl = checkRateLimit(ip, 'steam-account', 5, 60_000);
         if (!rl.ok) {
+          try {
+            const u = new URL(req.url, `http://localhost:${PORT}`);
+            const sid = u.searchParams.get('steamid');
+            console.log(`[rate-limit] ip=${ip} route=steam-account steamid=${sid} retry_after=${rl.retryAfter}s`);
+          } catch {}
           res.writeHead(429, { 'Content-Type':'application/json', 'Retry-After': String(rl.retryAfter) });
           res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter }));
           return;
@@ -137,6 +159,7 @@ const server = http.createServer(async (req, res) => {
         }
         try {
           // Create a shared timeout controller so the whole request times out consistently
+          const started = Date.now();
           const controller = new AbortController();
           const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
           const endpoints = {
@@ -155,7 +178,7 @@ const server = http.createServer(async (req, res) => {
           );
           const results = await Promise.all(promises).finally(() => clearTimeout(timer));
           if (controller.signal.aborted) {
-            if (DEBUG_HTTP) console.warn('[http] /api/steam-account timeout');
+            console.log(`[timeout] ip=${ip} route=steam-account steamid=${steamid} dur_ms=${API_TIMEOUT_MS}`);
             sendJSON(res, { error: 'timeout' }, 504);
             return;
           }
@@ -173,11 +196,12 @@ const server = http.createServer(async (req, res) => {
             recentMinutes: (recentJson && recentJson.response && Array.isArray(recentJson.response.games)
               ? recentJson.response.games.reduce((sum, g) => sum + (g.playtime_2weeks || 0), 0) : 0)
           };
-
+          console.log(`[lookup] ip=${ip} route=steam-account steamid=${steamid} player=${player? 'ok':'null'} ban=${ban? 'ok':'null'} dur_ms=${Date.now()-started}`);
           sendJSON(res, { player, ban, extras });
           return;
         } catch (e) {
           console.error('Proxy error', e);
+          try { console.log(`[error] ip=${ip} route=steam-account steamid=${steamid} message=${JSON.stringify(e && e.message || String(e))}`); } catch {}
           sendJSON(res, { error: 'proxy error' }, 500);
           return;
         }
@@ -242,6 +266,37 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+function getPreferredLocalAddress() {
+  try {
+    const nets = os.networkInterfaces();
+    let candidateIPv4 = null;
+    let candidateIPv6 = null;
+    for (const name of Object.keys(nets)) {
+      for (const n of nets[name] || []) {
+        if (!n || n.internal) continue;
+        const fam = n.family || '';
+        const addr = n.address || '';
+        // Prefer non-link-local IPv4
+        if (fam === 'IPv4' || fam === 4) {
+          if (!addr.startsWith('169.254.')) return addr;
+          if (!candidateIPv4) candidateIPv4 = addr;
+        }
+        // Save a non-link-local IPv6 as fallback
+        if (fam === 'IPv6' || fam === 6) {
+          if (!addr.startsWith('fe80:') && !candidateIPv6) candidateIPv6 = addr;
+        }
+      }
+    }
+    return candidateIPv4 || candidateIPv6 || null;
+  } catch {
+    return null;
+  }
+}
+
 server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  const addr = server.address && server.address();
+  const ip = getPreferredLocalAddress();
+  const host = ip ? (ip.includes(':') ? `[${ip}]` : ip) : 'localhost';
+  const port = (addr && addr.port) || PORT;
+  console.log(`Server running on http://${host}:${port}`);
 });

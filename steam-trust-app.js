@@ -138,7 +138,9 @@
 
             if (seg0 === "id" && parts[1]) {
             const vanity = parts[1];
-            return await this.resolveVanityName(vanity);
+            const r = await this.resolveVanityName(vanity);
+            if (r && typeof r === 'object' && r.error === 'rate_limited') return r;
+            return r;
             }
         }
 
@@ -150,14 +152,18 @@
 
         const shortUrlMatch = input.match(/^(?:\/)?(?:id|profiles)\/([^\/?#]+)/i);
         if (shortUrlMatch) {
-        const part = shortUrlMatch[1];
-        if (/^\d{17}$/.test(part)) return part;
-        return await this.resolveVanityName(part);
+    const part = shortUrlMatch[1];
+    if (/^\d{17}$/.test(part)) return part;
+    const r1 = await this.resolveVanityName(part);
+    if (r1 && typeof r1 === 'object' && r1.error === 'rate_limited') return r1;
+    return r1;
         }
 
-        if (/^[a-z0-9_\-]{3,32}$/i.test(input)) {
-        return await this.resolveVanityName(input);
-        }
+    if (/^[a-z0-9_\-]{3,32}$/i.test(input)) {
+    const r2 = await this.resolveVanityName(input);
+    if (r2 && typeof r2 === 'object' && r2.error === 'rate_limited') return r2;
+    return r2;
+    }
 
         return null;
     }
@@ -167,6 +173,16 @@
         const resp = await fetch(
             `/api/resolve-vanity?vanity=${encodeURIComponent(vanity)}`
         );
+        if (resp.status === 429) {
+            let retry = null;
+            try {
+                const j = await resp.json();
+                retry = j && j.retry_after;
+            } catch (e) {}
+            if (!retry) retry = parseInt(resp.headers.get('Retry-After')) || null;
+            return { error: 'rate_limited', retry_after: retry };
+        }
+        if (!resp.ok) return null;
         const json = await resp.json();
         return json && json.steamid ? json.steamid : null;
         } catch (e) {
@@ -558,11 +574,16 @@
         return;
         }
 
-        let steamId = await this.extractSteamId(input);
-        if (!steamId) {
-        this.showError("Could not resolve Steam ID. Please check your input.");
-        return;
-        }
+    let steamId = await this.extractSteamId(input);
+    if (steamId && typeof steamId === 'object' && steamId.error === 'rate_limited') {
+    const retryMessage = steamId.retry_after ? `Retry after ${steamId.retry_after}s` : 'Please try again later';
+    this.showError(`Rate limited — ${retryMessage}`);
+    return;
+    }
+    if (!steamId || typeof steamId !== 'string') {
+    this.showError("Could not resolve Steam ID. Please check your input.");
+    return;
+    }
 
         this.showSteamId(steamId);
 
