@@ -459,6 +459,8 @@
         }
 
         try {
+            // Normalize and inline flags so canvas rendering includes them
+            await this.prepareFlagsForCanvas(card);
             const canvas = await window.html2canvas(card, { backgroundColor: null, scale: 2, useCORS: true, allowTaint: false });
             const dataUrl = canvas.toDataURL('image/png');
 
@@ -480,6 +482,129 @@
         } catch (e) {
             console.error('Failed to render/download card image:', e);
         }
+    }
+
+    // Prepare flag nodes so html2canvas will render them reliably
+    async prepareFlagsForCanvas(root) {
+        try {
+            // 1) Convert emoji flags to image-based flags (SVG data URL)
+            const emojis = Array.from(root.querySelectorAll('span.flag-emoji[data-cc]'));
+            await Promise.all(emojis.map(async (span) => {
+                const cc = (span.getAttribute('data-cc') || '').toUpperCase();
+                if (!cc || cc.length !== 2) return;
+                const compStyles = window.getComputedStyle(span);
+                const fontSize = parseInt(compStyles.fontSize || '16', 10) || 16;
+                const w = Math.max(12, fontSize);
+                const h = Math.round(w * 0.75);
+                try {
+                    const resp = await fetch(`https://flagcdn.com/${cc.toLowerCase()}.svg`, { mode: 'cors', credentials: 'omit' });
+                    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                    const svg = await resp.text();
+                    const dataUrl = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+                    const img = document.createElement('img');
+                    img.className = 'flag-img';
+                    img.setAttribute('data-cc', cc);
+                    img.width = w; img.height = h;
+                    img.alt = `${cc} flag`;
+                    img.src = dataUrl;
+                    span.replaceWith(img);
+                } catch (e) {
+                    // Fallback inline text SVG
+                    const img = document.createElement('img');
+                    img.className = 'flag-img';
+                    img.setAttribute('data-cc', cc);
+                    img.width = w; img.height = h;
+                    img.alt = `${cc} flag`;
+                    img.src = this.buildTextFlagDataUrl(cc, w, h);
+                    span.replaceWith(img);
+                }
+            }));
+
+            // 2) Inline any remaining external SVGs and rasterize them to PNG data URLs
+            const imgs = Array.from(root.querySelectorAll('img.flag-img'));
+            if (!imgs.length) return;
+            await Promise.all(imgs.map(async (img) => {
+                try {
+                    const src = img.getAttribute('src') || '';
+                    const w = parseInt(img.getAttribute('width') || img.width || '24', 10) || 24;
+                    const h = parseInt(img.getAttribute('height') || img.height || Math.round(w*0.75), 10) || Math.round(w*0.75);
+                    let svgDataUrl = '';
+                    if (!src) return;
+                    if (src.startsWith('data:image/svg')) {
+                        svgDataUrl = src;
+                    } else if (src.endsWith('.svg')) {
+                        const r = await fetch(src, { mode: 'cors', credentials: 'omit' });
+                        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                        const svg = await r.text();
+                        svgDataUrl = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
+                    } else if (src.startsWith('data:')) {
+                        // already a data URL (maybe PNG) — keep
+                        return;
+                    } else {
+                        // Unknown external format — replace with text-based SVG
+                        svgDataUrl = this.buildTextFlagDataUrl((img.getAttribute('data-cc')||'??').toUpperCase(), w, h);
+                    }
+
+                    // Rasterize SVG to PNG to be 100% safe with canvas
+                    const pngDataUrl = await this.svgToPngDataUrl(svgDataUrl, w, h);
+                    img.setAttribute('src', pngDataUrl);
+                    img.setAttribute('width', String(w));
+                    img.setAttribute('height', String(h));
+                    img.removeAttribute('crossorigin');
+                    img.removeAttribute('referrerpolicy');
+                } catch (e) {
+                    // Fallback: simple text badge SVG so the canvas has something consistent
+                    const code = ((img.getAttribute('data-cc') || img.getAttribute('alt') || '').toUpperCase()).replace(/[^A-Z]/g, '').slice(0,2) || '??';
+                    const w = parseInt(img.getAttribute('width') || img.width || '24', 10) || 24;
+                    const h = parseInt(img.getAttribute('height') || img.height || Math.round(w*0.75), 10) || Math.round(w*0.75);
+                    img.setAttribute('src', this.buildTextFlagDataUrl(code, w, h));
+                    img.removeAttribute('crossorigin');
+                    img.removeAttribute('referrerpolicy');
+                }
+            }));
+        } catch (e) {
+            // Non-fatal
+        }
+    }
+
+    // Convert an SVG data URL to a PNG data URL at target size
+    async svgToPngDataUrl(svgDataUrl, width, height) {
+        return await new Promise((resolve, reject) => {
+            try {
+                const img = new Image();
+                img.onload = () => {
+                    try {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = Math.max(1, Math.floor(width));
+                        canvas.height = Math.max(1, Math.floor(height));
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        resolve(canvas.toDataURL('image/png'));
+                    } catch (e) {
+                        reject(e);
+                    }
+                };
+                img.onerror = reject;
+                img.src = svgDataUrl;
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
+
+    // Generate a minimal inline SVG data URL with the country code as text (fallback only)
+    buildTextFlagDataUrl(code, width, height) {
+        const bg = '#2b2f36';
+        const border = 'rgba(255,255,255,0.15)';
+        const txt = String(code || '').toUpperCase();
+        const w = Math.max(16, Number(width) || 24);
+        const h = Math.max(12, Number(height) || Math.round(w*0.75));
+        const svg = `<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <rect x="0.5" y="0.5" width="${w-1}" height="${h-1}" rx="3" ry="3" fill="${bg}" stroke="${border}" />
+  <text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" font-family="Segoe UI, Arial, sans-serif" font-size="${Math.round(h*0.55)}" font-weight="700" fill="#e6eef8">${txt}</text>
+</svg>`;
+        return 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg);
     }
 
     showLoading() {
