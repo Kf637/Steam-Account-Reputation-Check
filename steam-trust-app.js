@@ -208,7 +208,7 @@
         const { score, scoreLevel, isPrivate, ageDays, ageLevel } = scoreObj;
 
     const flag = window.Flags
-    ? (window.Flags.getFlagHtml ? window.Flags.getFlagHtml(player.loccountrycode, 18) : window.Flags.countryCodeToFlag(player.loccountrycode))
+    ? (window.Flags.getFlagHtml ? window.Flags.getFlagHtml(player.loccountrycode, 24) : window.Flags.countryCodeToFlag(player.loccountrycode))
     : "";
         const avatar =
         player.avatarfull ||
@@ -272,7 +272,7 @@
                   <img src="${avatar}" alt="Steam Avatar" class="avatar-img me-3" crossorigin="anonymous">
                 <div>
                     <h5 class="mb-1 d-flex align-items-center text-white">
-                    ${flag ? `<span class="me-2" style="font-size: 1.2em;">${flag}</span>` : ''}
+                    ${flag ? `<span class="me-2">${flag}</span>` : ''}
                     ${player.personaname || "Unknown"}
                     </h5>
                     <a href="${profileUrl}" target="_blank" class="text-decoration-none small text-white-50">

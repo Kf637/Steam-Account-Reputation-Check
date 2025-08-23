@@ -24,6 +24,20 @@ body {
   color: var(--bs-body-color);
 }
 
+/* Flag rendering helpers */
+.flag-emoji {
+  font-family: "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", "Twemoji Mozilla", "EmojiOne Color", system-ui, sans-serif;
+  line-height: 1;
+  display: inline-block;
+  vertical-align: middle;
+}
+.flag-img {
+  display: inline-block;
+  vertical-align: middle;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.08);
+}
+
 .main-container {
   flex: 1; /* pushes footer down if page is short */
   max-width: 800px;
