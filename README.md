@@ -113,8 +113,8 @@ The application implements per-IP rate limiting to ensure API quota compliance a
 | Endpoint | Limit | Window |
 |----------|-------|--------|
 | Page requests (`/`, `/index.html`) | 100 requests | 60 seconds |
-| `/api/resolve-vanity` | 5 requests | 60 seconds |
-| `/api/steam-account` | 5 requests | 60 seconds |
+| `/api/resolve-vanity` | 10 requests | 60 seconds |
+| `/api/steam-account` | 10 requests | 60 seconds |
 
 When rate limits are exceeded, the server responds with:
 - HTTP Status: `429 Too Many Requests`

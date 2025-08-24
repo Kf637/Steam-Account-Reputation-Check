@@ -85,8 +85,8 @@ const server = http.createServer(async (req, res) => {
     // Resolve vanity (server-side to avoid CORS)
     if (url.startsWith('/api/resolve-vanity')) {
   const ip = getClientIp(req);
-      // enforce: 5 requests per 60 seconds per IP
-      const rl = checkRateLimit(ip, 'resolve-vanity', 5, 60_000);
+      // enforce: 10 requests per 60 seconds per IP
+      const rl = checkRateLimit(ip, 'resolve-vanity', 10, 60_000);
       if (!rl.ok) {
         try {
           const u = new URL(req.url, `http://localhost:${PORT}`);
@@ -138,8 +138,8 @@ const server = http.createServer(async (req, res) => {
       // Proxy Steam API requests to avoid CORS in the browser
       if (url.startsWith('/api/steam-account')) {
   const ip = getClientIp(req);
-        // heavy endpoint: enforce 5 requests per 60 seconds per IP
-        const rl = checkRateLimit(ip, 'steam-account', 5, 60_000);
+        // heavy endpoint: enforce 10 requests per 60 seconds per IP
+        const rl = checkRateLimit(ip, 'steam-account', 10, 60_000);
         if (!rl.ok) {
           try {
             const u = new URL(req.url, `http://localhost:${PORT}`);
