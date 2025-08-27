@@ -254,7 +254,10 @@
     const localDate = `${pad(now.getDate())}/${pad(now.getMonth() + 1)}/${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
     reportLines.push(`Steam Account Reputation Report For ${displayName} — ${player.steamid}`);
     reportLines.push('');
-    reportLines.push(`Profile: ${isPrivate ? 'Private' : 'Public'}${ageDays !== null ? `, Age: ${ageDays} days` : ''}`);
+    reportLines.push(`Profile: ${isPrivate ? 'Private' : 'Public'}`);
+    if (ageDays !== null) {
+        reportLines.push(`Age: ${ageDays} days`);
+    }
     reportLines.push(`Bans: VAC ${vac}, Game ${gameBans}, Community ${community}, Trading ${trading}`);
     reportLines.push(`Last ban: ${banDays !== null ? `${banDays} days ago` : 'N/A'}`);
     reportLines.push(`Level: ${extras && extras.level != null ? extras.level : '?'}, Badges: ${extras && extras.badgesCount != null ? extras.badgesCount : '?'}, Games: ${extras && extras.games != null ? extras.games : '?'}, Groups: ${extras && extras.groups != null ? extras.groups : '?'}`);
