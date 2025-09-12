@@ -86,20 +86,20 @@ function sendFile(res, filePath) {
 }
 
 const server = http.createServer(async (req, res) => {
-  await Sentry.runWithAsyncContext(async () => {
-    const pathname = (req.url || '').split('?')[0] || '/';
-    // Attach basic request context
-    Sentry.setContext('request', {
-      method: req.method,
-      url: req.url,
-      headers: {
-        'user-agent': req.headers['user-agent'],
-        'cf-connecting-ip': req.headers['cf-connecting-ip'],
-        'x-forwarded-for': req.headers['x-forwarded-for'],
-      },
-      ip: getClientIp(req),
-    });
+  const pathname = (req.url || '').split('?')[0] || '/';
+  try {
     await Sentry.startSpan({ name: `${req.method} ${pathname}`, op: 'http.server' }, async () => {
+      // Attach basic request context
+      Sentry.setContext('request', {
+        method: req.method,
+        url: req.url,
+        headers: {
+          'user-agent': req.headers['user-agent'],
+          'cf-connecting-ip': req.headers['cf-connecting-ip'],
+          'x-forwarded-for': req.headers['x-forwarded-for'],
+        },
+        ip: getClientIp(req),
+      });
       try {
         const url = pathname;
   // Note: intentionally do NOT expose STEAM_API_KEY via an endpoint.
@@ -297,7 +297,12 @@ const server = http.createServer(async (req, res) => {
         res.end('Server error');
       }
     });
-  });
+  } catch (e) {
+    console.error('Server error (outer)', e);
+    Sentry.captureException(e);
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Server error');
+  }
 });
 
 server.listen(PORT, () => {
