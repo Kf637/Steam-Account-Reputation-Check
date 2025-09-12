@@ -59,12 +59,12 @@
         dsn: cfg.sentryDsn,
         sendDefaultPii: true,
         integrations: [
-          window.Sentry.browserTracingIntegration(),
-          window.Sentry.replayIntegration({
+          window.Sentry.Integrations && window.Sentry.Integrations.BrowserTracing ? new window.Sentry.Integrations.BrowserTracing() : undefined,
+          window.Sentry.Replay ? new window.Sentry.Replay({
             maskAllText: false,
             blockAllMedia: false
-          })
-        ],
+          }) : undefined
+        ].filter(Boolean),
         tracesSampleRate: cfg.sentryTracesSampleRate || 1.0,
         environment: cfg.sentryEnvironment || 'production',
         tracePropagationTargets: [
