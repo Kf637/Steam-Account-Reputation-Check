@@ -60,7 +60,10 @@
         sendDefaultPii: true,
         integrations: [
           window.Sentry.browserTracingIntegration(),
-          window.Sentry.replayIntegration()
+          window.Sentry.replayIntegration({
+            maskAllText: false,
+            blockAllMedia: false
+          })
         ],
         tracesSampleRate: cfg.sentryTracesSampleRate || 1.0,
         environment: cfg.sentryEnvironment || 'production',
