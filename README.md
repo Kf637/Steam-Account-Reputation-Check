@@ -102,6 +102,18 @@ Create a `.env` file in the project root with the following configuration:
 
 ```env
 STEAM_API_KEY=YOUR_STEAM_WEB_API_KEY_HERE
+
+# Sentry (optional)
+# Toggle Sentry (server + client). Default is true if unset.
+SENTRY_ENABLED=true
+# DSN used by both server and client if enabled
+SENTRY_DSN=https://<public-key>@<org>.ingest.sentry.io/<project-id>
+# Optional environment label for Sentry (e.g., production, staging, dev)
+SENTRY_ENVIRONMENT=production
+# Optional tracing sample rate (0.0 - 1.0)
+SENTRY_TRACES_SAMPLE_RATE=1.0
+# Optional browser SDK loader URL; when omitted a built-in default is used
+SENTRY_BROWSER_LOADER_URL=https://js.sentry-cdn.com/<loader-id>.min.js
 ```
 
 **Security Note**: The Steam API key is used exclusively server-side and never exposed to client browsers.

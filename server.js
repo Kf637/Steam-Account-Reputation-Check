@@ -1,18 +1,46 @@
 require('dotenv').config();
 const Sentry = require('@sentry/node');
-// Initialize Sentry as early as possible
+// Determine if Sentry is enabled from env (default true)
+const SENTRY_ENABLED = (() => {
+  const v = process.env.SENTRY_ENABLED;
+  if (v == null) return true;
+  return /^(1|true|yes|on)$/i.test(String(v));
+})();
+// Initialize Sentry as early as possible (honoring enabled toggle)
 Sentry.init({
-  dsn: process.env.SENTRY_DSN || 'https://4028085a88c3c6255b6c6d0dfcab93f4@o4510006270361600.ingest.de.sentry.io/4510006284255312',
+  enabled: SENTRY_ENABLED,
+  dsn: process.env.SENTRY_DSN || '',
   sendDefaultPii: true,
   tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || '1.0'),
   environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'production',
 });
+// Report unhandled errors at the process level
+try {
+  const util = require('util');
+  process.on('unhandledRejection', (reason) => {
+    try {
+      const err = reason instanceof Error ? reason : new Error(`UnhandledRejection: ${util.inspect(reason)}`);
+      Sentry.captureException(err);
+    } finally {
+      Sentry.flush(1500).catch(() => {});
+    }
+  });
+  process.on('uncaughtException', (err) => {
+    try {
+      Sentry.captureException(err);
+    } finally {
+      Sentry.flush(1500).catch(() => {});
+    }
+  });
+} catch {}
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const util = require('util');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3100;
+const SENTRY_BROWSER_LOADER_URL = process.env.SENTRY_BROWSER_LOADER_URL || 'https://js-de.sentry-cdn.com/4028085a88c3c6255b6c6d0dfcab93f4.min.js';
 const ROOT = path.resolve(__dirname);
 const DEBUG_HTTP = !!process.env.DEBUG_HTTP;
 const API_TIMEOUT_MS = 15000; // hardcoded 15s timeout for external API calls
@@ -68,10 +96,26 @@ function sendJSON(res, obj, code = 200) {
   res.end(body);
 }
 
-function sendFile(res, filePath) {
+function sendFile(req, res, filePath) {
   fs.stat(filePath, (err, st) => {
     if (err || !st.isFile()) {
       if (DEBUG_HTTP) console.warn(`[http] sendFile MISS: ${filePath} -> ${err ? err.message : 'not a file'}`);
+      try {
+        const ext = path.extname(filePath).toLowerCase();
+        if (ext === '.js' || ext === '.css' || ext === '.map') {
+          const ip = getClientIp(req);
+          Sentry.captureMessage('Static asset not found', {
+            level: 'warning',
+            extra: {
+              requestPath: req.url,
+              resolvedPath: filePath,
+              referrer: req.headers && req.headers.referer,
+              userAgent: req.headers && req.headers['user-agent'],
+              ip
+            }
+          });
+        }
+      } catch (_) {}
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Not Found');
       return;
@@ -102,6 +146,26 @@ const server = http.createServer(async (req, res) => {
       });
       try {
         const url = pathname;
+  // Serve client configuration for feature flags and Sentry
+  if (url === '/config.js') {
+    try {
+      const cfg = {
+        sentryEnabled: SENTRY_ENABLED,
+        sentryDsn: process.env.SENTRY_DSN || '',
+        sentryEnvironment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'production',
+        sentryTracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || '1.0'),
+        sentryBrowserLoaderUrl: SENTRY_BROWSER_LOADER_URL
+      };
+      const body = `window.APP_CONFIG=${JSON.stringify(cfg)};`;
+      res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(body);
+    } catch (e) {
+      if (SENTRY_ENABLED) Sentry.captureException(e);
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('config error');
+    }
+    return;
+  }
   // Note: intentionally do NOT expose STEAM_API_KEY via an endpoint.
   // The key remains server-side only and is used by the /api/steam-account proxy.
     // Resolve vanity (server-side to avoid CORS)
@@ -243,7 +307,7 @@ const server = http.createServer(async (req, res) => {
   const ip = getClientIp(req);
       const rl = checkRateLimit(ip, 'page-load', 100, 60_000);
       if (!rl.ok) { res.writeHead(429, { 'Content-Type': 'text/plain', 'Retry-After': String(rl.retryAfter) }); res.end('Too Many Requests'); return; }
-      sendFile(res, path.join(ROOT, 'index.html'));
+      sendFile(req, res, path.join(ROOT, 'index.html'));
       return;
     }
 
@@ -274,7 +338,7 @@ const server = http.createServer(async (req, res) => {
     try {
       const st = fs.statSync(safePath);
       if (st.isDirectory()) {
-        sendFile(res, path.join(ROOT, 'index.html'));
+        sendFile(req, res, path.join(ROOT, 'index.html'));
         return;
       }
     } catch (e) {
@@ -289,7 +353,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    sendFile(res, safePath);
+  sendFile(req, res, safePath);
       } catch (e) {
         console.error('Server error', e);
         Sentry.captureException(e);
