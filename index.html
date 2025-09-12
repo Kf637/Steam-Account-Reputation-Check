@@ -2,6 +2,34 @@
   src="https://js-de.sentry-cdn.com/4028085a88c3c6255b6c6d0dfcab93f4.min.js"
   crossorigin="anonymous"
 ></script>
+<script>
+  // Initialize Sentry as early as possible in the application's lifecycle
+  // Using the global `Sentry` object provided by the CDN loader
+  window.Sentry && window.Sentry.onLoad(function () {
+    window.Sentry.init({
+      dsn: "https://4028085a88c3c6255b6c6d0dfcab93f4@o4510006270361600.ingest.de.sentry.io/4510006284255312",
+      // Send default PII (e.g., IP address) with events
+      sendDefaultPii: true,
+      integrations: [
+        window.Sentry.browserTracingIntegration(),
+        window.Sentry.replayIntegration()
+      ],
+      // Tracing
+      tracesSampleRate: 1.0,
+      // Control which URLs should have distributed tracing enabled
+      tracePropagationTargets: [
+        "localhost",
+        // Same-origin API routes
+        typeof window !== 'undefined' ? window.location.origin : '',
+        /^https:\/\/steamrep\.kf637\.tech\/api\//,
+        /^\/api\//
+      ],
+      // Session Replay
+      replaysSessionSampleRate: 0.1,
+      replaysOnErrorSampleRate: 1.0
+    });
+  });
+</script>
 
 <!DOCTYPE html>
 <html lang="en">

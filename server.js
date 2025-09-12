@@ -1,4 +1,12 @@
 require('dotenv').config();
+const Sentry = require('@sentry/node');
+// Initialize Sentry as early as possible
+Sentry.init({
+  dsn: process.env.SENTRY_DSN || 'https://4028085a88c3c6255b6c6d0dfcab93f4@o4510006270361600.ingest.de.sentry.io/4510006284255312',
+  sendDefaultPii: true,
+  tracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || '1.0'),
+  environment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'production',
+});
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -78,8 +86,22 @@ function sendFile(res, filePath) {
 }
 
 const server = http.createServer(async (req, res) => {
-  try {
-    const url = req.url.split('?')[0] || '/';
+  await Sentry.runWithAsyncContext(async () => {
+    const pathname = (req.url || '').split('?')[0] || '/';
+    // Attach basic request context
+    Sentry.setContext('request', {
+      method: req.method,
+      url: req.url,
+      headers: {
+        'user-agent': req.headers['user-agent'],
+        'cf-connecting-ip': req.headers['cf-connecting-ip'],
+        'x-forwarded-for': req.headers['x-forwarded-for'],
+      },
+      ip: getClientIp(req),
+    });
+    await Sentry.startSpan({ name: `${req.method} ${pathname}`, op: 'http.server' }, async () => {
+      try {
+        const url = pathname;
   // Note: intentionally do NOT expose STEAM_API_KEY via an endpoint.
   // The key remains server-side only and is used by the /api/steam-account proxy.
     // Resolve vanity (server-side to avoid CORS)
@@ -92,6 +114,10 @@ const server = http.createServer(async (req, res) => {
           const u = new URL(req.url, `http://localhost:${PORT}`);
           const vanity = u.searchParams.get('vanity');
           console.log(`[rate-limit] ip=${ip} route=resolve-vanity vanity=${JSON.stringify(vanity)} retry_after=${rl.retryAfter}s`);
+          Sentry.captureMessage('Rate limited: resolve-vanity', {
+            level: 'info',
+            extra: { ip, vanity, retry_after: rl.retryAfter }
+          });
         } catch {}
         res.writeHead(429, { 'Content-Type':'application/json', 'Retry-After': String(rl.retryAfter) });
         res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter }));
@@ -127,10 +153,12 @@ const server = http.createServer(async (req, res) => {
         if (e && (e.name === 'AbortError' || e.code === 'ABORT_ERR')) {
           const vanitySafe = (()=>{ try { const u = new URL(req.url, `http://localhost:${PORT}`); return u.searchParams.get('vanity'); } catch { return null; } })();
           console.log(`[timeout] ip=${ip} route=resolve-vanity vanity=${JSON.stringify(vanitySafe)} dur_ms=${API_TIMEOUT_MS}`);
+          Sentry.captureMessage('Timeout: resolve-vanity', { level: 'warning', extra: { ip, vanity: vanitySafe, dur_ms: API_TIMEOUT_MS } });
           sendJSON(res, { error: 'timeout' }, 504);
           return;
         }
         console.error('vanity resolve error', e);
+        Sentry.captureException(e);
         sendJSON(res, { error: 'server error' }, 500);
       }
       return;
@@ -145,6 +173,7 @@ const server = http.createServer(async (req, res) => {
             const u = new URL(req.url, `http://localhost:${PORT}`);
             const sid = u.searchParams.get('steamid');
             console.log(`[rate-limit] ip=${ip} route=steam-account steamid=${sid} retry_after=${rl.retryAfter}s`);
+            Sentry.captureMessage('Rate limited: steam-account', { level: 'info', extra: { ip, steamid: sid, retry_after: rl.retryAfter } });
           } catch {}
           res.writeHead(429, { 'Content-Type':'application/json', 'Retry-After': String(rl.retryAfter) });
           res.end(JSON.stringify({ error:'rate_limited', retry_after: rl.retryAfter }));
@@ -179,6 +208,7 @@ const server = http.createServer(async (req, res) => {
           const results = await Promise.all(promises).finally(() => clearTimeout(timer));
           if (controller.signal.aborted) {
             console.log(`[timeout] ip=${ip} route=steam-account steamid=${steamid} dur_ms=${API_TIMEOUT_MS}`);
+            Sentry.captureMessage('Timeout: steam-account', { level: 'warning', extra: { ip, steamid, dur_ms: API_TIMEOUT_MS } });
             sendJSON(res, { error: 'timeout' }, 504);
             return;
           }
@@ -202,6 +232,7 @@ const server = http.createServer(async (req, res) => {
         } catch (e) {
           console.error('Proxy error', e);
           try { console.log(`[error] ip=${ip} route=steam-account steamid=${steamid} message=${JSON.stringify(e && e.message || String(e))}`); } catch {}
+          Sentry.captureException(e);
           sendJSON(res, { error: 'proxy error' }, 500);
           return;
         }
@@ -259,11 +290,14 @@ const server = http.createServer(async (req, res) => {
     }
 
     sendFile(res, safePath);
-  } catch (e) {
-    console.error('Server error', e);
-    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Server error');
-  }
+      } catch (e) {
+        console.error('Server error', e);
+        Sentry.captureException(e);
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Server error');
+      }
+    });
+  });
 });
 
 server.listen(PORT, () => {
