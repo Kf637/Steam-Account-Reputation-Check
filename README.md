@@ -114,9 +114,21 @@ SENTRY_ENVIRONMENT=production
 SENTRY_TRACES_SAMPLE_RATE=1.0
 # Optional browser SDK loader URL; when omitted a built-in default is used
 SENTRY_BROWSER_LOADER_URL=https://js.sentry-cdn.com/<loader-id>.min.js
+
+# Cloudflare Turnstile (optional)
+# Enables a popup challenge and stores a 6-hour cookie after successful verification.
+TURNSTILE_ENABLED=false
+TURNSTILE_SITE_KEY=0x...
+TURNSTILE_SECRET_KEY=0x...
+# Optional cookie name override (default: cf_turnstile_token)
+TURNSTILE_COOKIE_NAME=cf_turnstile_token
 ```
 
 **Security Note**: The Steam API key is used exclusively server-side and never exposed to client browsers.
+
+### Cloudflare Turnstile
+
+When enabled, a Turnstile popup is shown on first use (or when the cookie expires). After a successful challenge, the server stores a cookie with a 6-hour TTL to avoid re-prompting during that window. If the cookie is missing or cleared, the popup will appear again.
 
 ### Rate Limiting
 

@@ -6,8 +6,15 @@
     init() {
             // detect features once at init
             this.canDownloadCard = this.checkDownloadSupport();
+            this.turnstileEnabled = false;
+            this.turnstileVerified = false;
+            this.turnstileSiteKey = '';
+            this.turnstileRenderId = null;
+            this.turnstilePendingPromise = null;
+            this.turnstilePendingResolve = null;
             this.setupEventListeners();
             this.setupSteamApiProxy();
+            this.initTurnstileGate();
     }
 
         checkDownloadSupport() {
@@ -45,6 +52,165 @@
             } catch (e) {
                 return false;
             }
+        }
+
+        async loadAppConfig() {
+            if (window.APP_CONFIG) return window.APP_CONFIG;
+            try {
+                const resp = await fetch('/config.js', { cache: 'no-store' });
+                if (resp.ok) {
+                    const js = await resp.text();
+                    if (js) {
+                        try { eval(js); } catch (_) {}
+                    }
+                }
+            } catch (e) {}
+            return window.APP_CONFIG || {};
+        }
+
+        async initTurnstileGate() {
+            try {
+                const cfg = await this.loadAppConfig();
+                this.turnstileEnabled = !!(cfg && cfg.turnstileEnabled && cfg.turnstileSiteKey);
+                this.turnstileSiteKey = (cfg && cfg.turnstileSiteKey) || '';
+                if (!this.turnstileEnabled) return;
+                const status = await this.checkTurnstileStatus();
+                if (status && status.ok) {
+                    this.turnstileVerified = true;
+                    return;
+                }
+                this.showTurnstilePopup();
+            } catch (e) {
+                this.showTurnstilePopup();
+            }
+        }
+
+        async checkTurnstileStatus() {
+            try {
+                const resp = await fetch('/api/turnstile-status', { cache: 'no-store' });
+                if (!resp.ok) return { ok: false };
+                return await resp.json();
+            } catch (e) {
+                return { ok: false };
+            }
+        }
+
+        async ensureTurnstileScript() {
+            if (window.turnstile) return;
+            await new Promise((resolve, reject) => {
+                const existing = document.querySelector('script[data-turnstile]');
+                if (existing) {
+                    existing.addEventListener('load', resolve);
+                    existing.addEventListener('error', reject);
+                    return;
+                }
+                const s = document.createElement('script');
+                s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit';
+                s.async = true;
+                s.defer = true;
+                s.setAttribute('data-turnstile', 'true');
+                s.onload = resolve;
+                s.onerror = reject;
+                document.head.appendChild(s);
+            });
+        }
+
+        showTurnstileError(message) {
+            const el = document.getElementById('turnstileError');
+            if (el) el.textContent = message || '';
+        }
+
+        async renderTurnstileWidget() {
+            try {
+                await this.ensureTurnstileScript();
+                if (!window.turnstile) return;
+                const container = document.getElementById('turnstileWidget');
+                if (!container) return;
+                this.showTurnstileError('');
+                if (this.turnstileRenderId != null) {
+                    try { window.turnstile.reset(this.turnstileRenderId); } catch (e) {}
+                    return;
+                }
+                container.innerHTML = '';
+                this.turnstileRenderId = window.turnstile.render(container, {
+                    sitekey: this.turnstileSiteKey,
+                    callback: (token) => this.verifyTurnstileToken(token),
+                    'expired-callback': () => {
+                        this.turnstileVerified = false;
+                        this.showTurnstileError('Verification expired. Please try again.');
+                    },
+                    'error-callback': () => {
+                        this.turnstileVerified = false;
+                        this.showTurnstileError('Verification failed. Please try again.');
+                    }
+                });
+            } catch (e) {
+                this.showTurnstileError('Unable to load verification. Please refresh and try again.');
+            }
+        }
+
+        showTurnstilePopup() {
+            if (!this.turnstileEnabled) return Promise.resolve(true);
+            if (this.turnstilePendingPromise) return this.turnstilePendingPromise;
+            const overlay = document.getElementById('turnstileOverlay');
+            if (overlay) {
+                overlay.classList.add('show');
+                overlay.setAttribute('aria-hidden', 'false');
+            }
+            this.renderTurnstileWidget();
+            this.turnstilePendingPromise = new Promise((resolve) => {
+                this.turnstilePendingResolve = resolve;
+            });
+            return this.turnstilePendingPromise;
+        }
+
+        hideTurnstilePopup() {
+            const overlay = document.getElementById('turnstileOverlay');
+            if (overlay) {
+                overlay.classList.remove('show');
+                overlay.setAttribute('aria-hidden', 'true');
+            }
+        }
+
+        async verifyTurnstileToken(token) {
+            try {
+                const resp = await fetch('/api/turnstile-verify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token })
+                });
+                if (!resp.ok) {
+                    this.showTurnstileError('Verification failed. Please try again.');
+                    try { if (window.turnstile && this.turnstileRenderId != null) window.turnstile.reset(this.turnstileRenderId); } catch (e) {}
+                    return;
+                }
+                const json = await resp.json().catch(() => null);
+                if (json && json.ok) {
+                    this.turnstileVerified = true;
+                    this.hideTurnstilePopup();
+                    if (this.turnstilePendingResolve) this.turnstilePendingResolve(true);
+                    this.turnstilePendingPromise = null;
+                    this.turnstilePendingResolve = null;
+                    return;
+                }
+                this.showTurnstileError('Verification failed. Please try again.');
+                try { if (window.turnstile && this.turnstileRenderId != null) window.turnstile.reset(this.turnstileRenderId); } catch (e) {}
+            } catch (e) {
+                this.showTurnstileError('Verification failed. Please try again.');
+                try { if (window.turnstile && this.turnstileRenderId != null) window.turnstile.reset(this.turnstileRenderId); } catch (e) {}
+            }
+        }
+
+        async requireTurnstileVerification() {
+            if (!this.turnstileEnabled) return true;
+            if (this.turnstileVerified) return true;
+            const status = await this.checkTurnstileStatus();
+            if (status && status.ok) {
+                this.turnstileVerified = true;
+                return true;
+            }
+            await this.showTurnstilePopup();
+            return true;
         }
 
     setupEventListeners() {
@@ -702,6 +868,8 @@
 
         trustResults.innerHTML = "";
         trustSteamId.style.display = "none";
+
+        await this.requireTurnstileVerification();
 
         if (!input) {
         this.showError("Please enter a SteamID64 or profile URL.");

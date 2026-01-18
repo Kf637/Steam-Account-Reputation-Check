@@ -41,6 +41,16 @@ const util = require('util');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3100;
 const SENTRY_BROWSER_LOADER_URL = process.env.SENTRY_BROWSER_LOADER_URL || 'https://js-de.sentry-cdn.com/4028085a88c3c6255b6c6d0dfcab93f4.min.js';
+function parseEnvBool(value, defaultValue = false) {
+  if (value == null) return defaultValue;
+  return /^(1|true|yes|on)$/i.test(String(value));
+}
+const TURNSTILE_ENABLED = parseEnvBool(process.env.TURNSTILE_ENABLED, false);
+const TURNSTILE_SITE_KEY = process.env.TURNSTILE_SITE_KEY || '';
+const TURNSTILE_SECRET_KEY = process.env.TURNSTILE_SECRET_KEY || '';
+const TURNSTILE_COOKIE_NAME = process.env.TURNSTILE_COOKIE_NAME || 'cf_turnstile_token';
+const TURNSTILE_COOKIE_TTL_SECONDS = 6 * 60 * 60; // 6 hours
+const TURNSTILE_ACTIVE = TURNSTILE_ENABLED && TURNSTILE_SITE_KEY && TURNSTILE_SECRET_KEY;
 const ROOT = path.resolve(__dirname);
 const DEBUG_HTTP = !!process.env.DEBUG_HTTP;
 const API_TIMEOUT_MS = 15000; // hardcoded 15s timeout for external API calls
@@ -94,6 +104,94 @@ function sendJSON(res, obj, code = 200) {
     'X-Frame-Options': 'DENY'
   });
   res.end(body);
+}
+
+function parseCookies(req) {
+  const header = (req.headers && req.headers.cookie) || '';
+  const out = {};
+  header.split(';').forEach((pair) => {
+    const idx = pair.indexOf('=');
+    if (idx <= 0) return;
+    const key = pair.slice(0, idx).trim();
+    const val = pair.slice(idx + 1).trim();
+    if (!key) return;
+    out[key] = decodeURIComponent(val);
+  });
+  return out;
+}
+
+function isSecureRequest(req) {
+  try {
+    const xfProto = req.headers && req.headers['x-forwarded-proto'];
+    if (xfProto && String(xfProto).toLowerCase() === 'https') return true;
+    return !!(req.socket && req.socket.encrypted);
+  } catch (_) {
+    return false;
+  }
+}
+
+function buildTurnstileCookie(token, req) {
+  const parts = [];
+  parts.push(`${TURNSTILE_COOKIE_NAME}=${encodeURIComponent(token)}`);
+  parts.push(`Max-Age=${TURNSTILE_COOKIE_TTL_SECONDS}`);
+  parts.push('Path=/');
+  parts.push('SameSite=Lax');
+  parts.push('HttpOnly');
+  if (isSecureRequest(req)) parts.push('Secure');
+  return parts.join('; ');
+}
+
+function buildClearTurnstileCookie(req) {
+  const parts = [];
+  parts.push(`${TURNSTILE_COOKIE_NAME}=`);
+  parts.push('Max-Age=0');
+  parts.push('Path=/');
+  parts.push('SameSite=Lax');
+  parts.push('HttpOnly');
+  if (isSecureRequest(req)) parts.push('Secure');
+  return parts.join('; ');
+}
+
+async function readRequestBody(req) {
+  return await new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => {
+      data += chunk;
+      if (data.length > 1_000_000) {
+        reject(new Error('Body too large'));
+        req.destroy();
+      }
+    });
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+async function verifyTurnstileToken(token, req) {
+  if (!TURNSTILE_ACTIVE) return { ok: true, bypass: true };
+  if (!token) return { ok: false, errorCodes: ['missing-token'] };
+  const params = new URLSearchParams();
+  params.set('secret', TURNSTILE_SECRET_KEY);
+  params.set('response', token);
+  const ip = getClientIp(req);
+  if (ip) params.set('remoteip', ip);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+  try {
+    const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params,
+      signal: controller.signal
+    });
+    const json = await resp.json().catch(() => null);
+    if (json && json.success) return { ok: true };
+    return { ok: false, errorCodes: (json && json['error-codes']) || ['invalid-response'] };
+  } catch (e) {
+    return { ok: false, errorCodes: ['verify-failed'] };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function sendFile(req, res, filePath) {
@@ -154,7 +252,9 @@ const server = http.createServer(async (req, res) => {
         sentryDsn: process.env.SENTRY_DSN || '',
         sentryEnvironment: process.env.SENTRY_ENVIRONMENT || process.env.NODE_ENV || 'production',
         sentryTracesSampleRate: Number(process.env.SENTRY_TRACES_SAMPLE_RATE || '1.0'),
-        sentryBrowserLoaderUrl: SENTRY_BROWSER_LOADER_URL
+        sentryBrowserLoaderUrl: SENTRY_BROWSER_LOADER_URL,
+        turnstileEnabled: TURNSTILE_ACTIVE,
+        turnstileSiteKey: TURNSTILE_SITE_KEY
       };
       const body = `window.APP_CONFIG=${JSON.stringify(cfg)};`;
       res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -166,8 +266,57 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
-  // Note: intentionally do NOT expose STEAM_API_KEY via an endpoint.
-  // The key remains server-side only and is used by the /api/steam-account proxy.
+    if (url === '/api/turnstile-status') {
+      if (!TURNSTILE_ACTIVE) {
+        sendJSON(res, { enabled: false, ok: true });
+        return;
+      }
+      const cookies = parseCookies(req);
+      const token = cookies[TURNSTILE_COOKIE_NAME] || '';
+      if (!token) {
+        sendJSON(res, { enabled: true, ok: false, reason: 'missing' });
+        return;
+      }
+
+      sendJSON(res, { enabled: true, ok: true });
+      return;
+    }
+
+    // Verify a Turnstile token provided by the client
+    if (url === '/api/turnstile-verify') {
+      if (req.method !== 'POST') {
+        res.writeHead(405, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'method_not_allowed' }));
+        return;
+      }
+      if (!TURNSTILE_ACTIVE) {
+        sendJSON(res, { enabled: false, ok: true });
+        return;
+      }
+      try {
+        const raw = await readRequestBody(req);
+        let token = '';
+        const ctype = (req.headers && req.headers['content-type']) || '';
+        if (ctype.includes('application/json')) {
+          const parsed = JSON.parse(raw || '{}');
+          token = parsed && parsed.token ? String(parsed.token) : '';
+        } else if (ctype.includes('application/x-www-form-urlencoded')) {
+          const params = new URLSearchParams(raw);
+          token = params.get('token') || params.get('response') || '';
+        }
+        const result = await verifyTurnstileToken(token, req);
+        if (result.ok) {
+          res.setHeader('Set-Cookie', buildTurnstileCookie(token, req));
+          sendJSON(res, { ok: true });
+        } else {
+          res.setHeader('Set-Cookie', buildClearTurnstileCookie(req));
+          sendJSON(res, { ok: false, errorCodes: result.errorCodes || [] }, 403);
+        }
+      } catch (e) {
+        sendJSON(res, { ok: false, error: 'server_error' }, 500);
+      }
+      return;
+    }
     // Resolve vanity (server-side to avoid CORS)
     if (url.startsWith('/api/resolve-vanity')) {
   const ip = getClientIp(req);
