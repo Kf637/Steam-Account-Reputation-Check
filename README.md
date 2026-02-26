@@ -1,4 +1,7 @@
+
 # Steam Account Reputation Check
+### Note: This repo does not include the user rating and Steam login features.
+
 
 Preview: https://steamrep.kf637.tech
 
