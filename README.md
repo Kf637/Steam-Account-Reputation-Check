@@ -3,7 +3,7 @@
 ### Note: This repo does not include the user rating and Steam login features.
 
 
-Preview: https://steamrep.kf637.tech
+Preview: https://steamrep.no
 
 A lightweight web application for analyzing Steam account reputation through various trust signals including profile data, ban history, account level, community participation, and gaming activity. Simply enter a SteamID64, vanity username, or profile URL to receive a comprehensive trust assessment.
 
