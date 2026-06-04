@@ -1,7 +1,7 @@
 
 # Steam Account Reputation Check
 ### Note: This repo does not include the user rating and Steam login features.
-
+### No further updates will be pushed unless they address a vulnerability, update the npm package version, or implement an accepted pull request.
 
 Preview: https://steamrep.no
 
